@@ -1,7 +1,18 @@
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 #[macro_use]
 extern crate serde_derive;
+extern crate directories;
+extern crate reqwest;
+extern crate serde_json;
 
+const CURRENT_SET: u8 = 2;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ExpirationWrapper {
+    expire_time: u64,
+    card_set_json: CardSetJson,
+}
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CardSetJson {
     pub card_set: CardSet,
@@ -151,7 +162,97 @@ pub struct Reference {
     pub count: u32,
 }
 
-#[cfg(test)]
+#[derive(Serialize, Deserialize)]
+struct JsonRef {
+    cdn_root: String,
+    url: String,
+    expire_time: u64,
+}
+
+use std::fs::{create_dir, read_dir, File};
+pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
+    let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let proj_dir = directories::ProjectDirs::from("", "", "artifact_lib").unwrap();
+    let cache_dir = proj_dir.cache_dir();
+    let dir = match read_dir(cache_dir) {
+        Ok(d) => d,
+        Err(_) => match create_dir(cache_dir) {
+            Ok(_) => read_dir(cache_dir).unwrap(),
+            Err(e) => panic!(
+                "Error reading or creating directory: {:?}, {}",
+                cache_dir, e
+            ),
+        },
+    };
+
+    println!("Attempting to fetch card sets from cache");
+    // allow data fetching if dir is empty
+    let mut fetch_data = true;
+    for path in dir {
+        fetch_data = false;
+        let file: ExpirationWrapper = serde_json::from_reader(
+            File::open(path.unwrap().path()).expect("something broke reading cache file"),
+        )
+        .unwrap();
+        if std::time::Duration::new(file.expire_time, 0) < time {
+            println!("A card set has expired, fetching new card sets");
+            fetch_data = true;
+            break;
+        }
+    }
+
+    // if new or expired cards
+    if fetch_data {
+        println!("Attempting to fetch card sets from API");
+        let mut card_sets_wrapped: Vec<ExpirationWrapper> = Vec::new();
+        let valve_api_path = "https://playartifact.com/cardset/";
+        for i in 0..CURRENT_SET {
+            let url = format!("{}{}", valve_api_path, i);
+            let redir: JsonRef = reqwest::get(url.as_str()).unwrap().json().unwrap();
+            let card_set_url = format!("{}{}", redir.cdn_root, redir.url);
+
+            let card_set: crate::CardSetJson =
+                reqwest::get(card_set_url.as_str()).unwrap().json().unwrap();
+
+            card_sets_wrapped.push(ExpirationWrapper {
+                card_set_json: card_set,
+                expire_time: redir.expire_time,
+            });
+        }
+
+        for (i, wrapper) in card_sets_wrapped.iter().enumerate() {
+            let f = format!("card_set_{}.json", i);
+            let path = cache_dir.join(f);
+            let file = File::create(path).unwrap();
+            let _ = serde_json::to_writer(file, &wrapper);
+        }
+    }
+
+    // finally fetch the card set from cache for real
+    let dir = match read_dir(cache_dir) {
+        Ok(d) => d,
+        Err(_) => match create_dir(cache_dir) {
+            Ok(_) => read_dir(cache_dir).unwrap(),
+            Err(e) => panic!(
+                "Error reading or creating directory: {:?}, {}",
+                cache_dir, e
+            ),
+        },
+    };
+
+    let mut card_sets: Vec<CardSet> = Vec::new();
+    for path in dir {
+        let file: ExpirationWrapper = serde_json::from_reader(
+            File::open(path.unwrap().path()).expect("something broke reading cache file"),
+        )
+        .unwrap();
+
+        card_sets.push(file.card_set_json.card_set);
+    }
+
+    Ok(card_sets)
+}
+
 /// Takes in a vector of JSON formatted &str and attempts to coerce them into CardSetJson,
 /// if successful, maps card_ids to Cards.\
 /// The JSON should take the form mentioned
@@ -244,5 +345,10 @@ mod tests {
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);
+    }
+
+    #[test]
+    fn fetch_cards() {
+        let _sets = crate::get_all_card_sets();
     }
 }
