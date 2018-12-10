@@ -1,10 +1,12 @@
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 #[macro_use]
 extern crate serde_derive;
 extern crate directories;
 extern crate reqwest;
 extern crate serde_json;
+
+use std::collections::HashMap;
+use std::fs::{create_dir, read_dir, File};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const CURRENT_SET: u8 = 2;
 
@@ -169,7 +171,10 @@ struct JsonRef {
     expire_time: u64,
 }
 
-use std::fs::{create_dir, read_dir, File};
+/// This function will search the user's local cache for
+/// the card set data, if not found or out of date, will
+/// fetch updates from Valve's API and update the cached files.
+/// Once that process is complete, it will return a Vec of [CardSet](struct.CardSet)s.
 pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let proj_dir = directories::ProjectDirs::from("", "", "artifact_lib").unwrap();
