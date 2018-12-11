@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate serde_derive;
+extern crate artifact_serde;
 extern crate directories;
+extern crate regex;
 extern crate reqwest;
 extern crate serde_json;
 
@@ -19,13 +21,13 @@ struct ExpirationWrapper {
 pub struct CardSetJson {
     pub card_set: CardSet,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CardSet {
     pub version: u32,
     pub set_info: SetInfo,
     pub card_list: Vec<Card>,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SetInfo {
     pub set_id: u32,
     pub pack_item_def: u32,
@@ -122,6 +124,13 @@ pub struct Card {
     pub hit_points: u32,
     pub references: Vec<Reference>,
 }
+
+impl std::cmp::PartialEq for Card {
+    fn eq(&self, other: &Card) -> bool {
+        self.card_id == other.card_id
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HeroCard {
     pub card: Card,
@@ -164,6 +173,83 @@ pub struct Reference {
     pub count: u32,
 }
 
+pub struct Artifact {
+    pub card_sets: Vec<CardSet>,
+    id_map: HashMap<u32, Card>,
+    name_map: HashMap<String, Card>,
+}
+
+impl Artifact {
+    pub fn new() -> Self {
+        let card_sets = get_all_card_sets().unwrap();
+        let id_map = map_ids_to_cards(card_sets.clone());
+        let name_map = map_names_to_cards(card_sets.clone());
+        Self {
+            card_sets,
+            id_map,
+            name_map,
+        }
+    }
+
+    pub fn card_from_name(&self, name: &str) -> Option<&Card> {
+        self.card_from_name_string(&String::from(name))
+    }
+
+    pub fn card_from_name_string(&self, name: &String) -> Option<&Card> {
+        self.name_map.get(name)
+    }
+
+    pub fn card_from_id(&self, id: u32) -> Option<&Card> {
+        self.id_map.get(&id)
+    }
+
+    pub fn get_deck(&self, adc: &str) -> Result<Deck, String> {
+        let mut decoded_deck = artifact_serde::de::decode(adc).unwrap();
+        let mut heroes = Vec::new();
+        for hero in decoded_deck.heroes {
+            let card = match self.id_map.get(&hero.id) {
+                Some(c) => c.clone(),
+                None => continue,
+            };
+            let refer = card.references.clone();
+            for r in refer {
+                if r.ref_type == "includes" {
+                    decoded_deck
+                        .cards
+                        .push(artifact_serde::de::DeserializedCard {
+                            id: r.card_id,
+                            count: r.count,
+                        });
+                }
+            }
+
+            heroes.push(HeroCard {
+                card,
+                turn: hero.turn,
+            });
+        }
+
+        let mut cards = Vec::new();
+        for ref_card in decoded_deck.cards {
+            let card = match self.id_map.get(&ref_card.id) {
+                Some(c) => c.clone(),
+                None => continue,
+            };
+
+            cards.push(CardCard {
+                card,
+                count: ref_card.count,
+            });
+        }
+
+        Ok(Deck {
+            heroes,
+            cards,
+            name: decoded_deck.name,
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct JsonRef {
     cdn_root: String,
@@ -174,7 +260,7 @@ struct JsonRef {
 /// This function will search the user's local cache for
 /// the card set data, if not found or out of date, will
 /// fetch updates from Valve's API and update the cached files.
-/// Once that process is complete, it will return a Vec of [CardSet](struct.CardSet)s.
+/// Once that process is complete, it will return a Vec of [CardSets](struct.CardSet.html).
 pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let proj_dir = directories::ProjectDirs::from("", "", "artifact_lib").unwrap();
@@ -183,164 +269,110 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
         Ok(d) => d,
         Err(_) => match create_dir(cache_dir) {
             Ok(_) => read_dir(cache_dir).unwrap(),
-            Err(e) => panic!(
-                "Error reading or creating directory: {:?}, {}",
-                cache_dir, e
-            ),
+            Err(e) => {
+                return Err(format!(
+                    "Error reading or creating directory: {:?}, {}",
+                    cache_dir, e
+                ))
+            }
         },
     };
 
+    let mut fetch_sets = Vec::new();
+    // assume all are missing
+    for i in 0..CURRENT_SET {
+        fetch_sets.push(i);
+    }
     println!("Attempting to fetch card sets from cache");
-    // allow data fetching if dir is empty
-    let mut fetch_data = true;
-    for path in dir {
-        fetch_data = false;
-        let file: ExpirationWrapper = serde_json::from_reader(
-            File::open(path.unwrap().path()).expect("something broke reading cache file"),
-        )
-        .unwrap();
-        if std::time::Duration::new(file.expire_time, 0) < time {
-            println!("A card set has expired, fetching new card sets");
-            fetch_data = true;
-            break;
-        }
-    }
-
-    // if new or expired cards
-    if fetch_data {
-        println!("Attempting to fetch card sets from API");
-        let mut card_sets_wrapped: Vec<ExpirationWrapper> = Vec::new();
-        let valve_api_path = "https://playartifact.com/cardset/";
-        for i in 0..CURRENT_SET {
-            let url = format!("{}{}", valve_api_path, i);
-            let redir: JsonRef = reqwest::get(url.as_str()).unwrap().json().unwrap();
-            let card_set_url = format!("{}{}", redir.cdn_root, redir.url);
-
-            let card_set: crate::CardSetJson =
-                reqwest::get(card_set_url.as_str()).unwrap().json().unwrap();
-
-            card_sets_wrapped.push(ExpirationWrapper {
-                card_set_json: card_set,
-                expire_time: redir.expire_time,
-            });
-        }
-
-        for (i, wrapper) in card_sets_wrapped.iter().enumerate() {
-            let f = format!("card_set_{}.json", i);
-            let path = cache_dir.join(f);
-            let file = File::create(path).unwrap();
-            let _ = serde_json::to_writer(file, &wrapper);
-        }
-    }
-
-    // finally fetch the card set from cache for real
-    let dir = match read_dir(cache_dir) {
-        Ok(d) => d,
-        Err(_) => match create_dir(cache_dir) {
-            Ok(_) => read_dir(cache_dir).unwrap(),
-            Err(e) => panic!(
-                "Error reading or creating directory: {:?}, {}",
-                cache_dir, e
-            ),
-        },
-    };
-
     let mut card_sets: Vec<CardSet> = Vec::new();
     for path in dir {
-        let file: ExpirationWrapper = serde_json::from_reader(
+        let file: ExpirationWrapper = match serde_json::from_reader(
             File::open(path.unwrap().path()).expect("something broke reading cache file"),
-        )
-        .unwrap();
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(format!(
+                    "failed to coerce cache file to ExpirationWrapper: {}",
+                    e
+                ))
+            }
+        };
 
-        card_sets.push(file.card_set_json.card_set);
+        let id = file.card_set_json.card_set.set_info.set_id;
+        if std::time::Duration::new(file.expire_time, 0) > time {
+            println!("card set {} is up to date", id);
+            let rem = fetch_sets.iter().position(|x| *x == id as u8).unwrap();
+            fetch_sets.remove(rem);
+            card_sets.push(file.card_set_json.card_set);
+        } else {
+            println!("card set {} is expired", id);
+        }
+    }
+
+    let mut card_sets_wrapped: Vec<ExpirationWrapper> = Vec::new();
+    for set in fetch_sets {
+        println!("Fetching card set {} from API", set);
+        let set = match fetch_card_set(set) {
+            Ok(r) => r,
+            Err(e) => return Err(e),
+        };
+        card_sets_wrapped.push(set);
+    }
+
+    for wrapper in card_sets_wrapped {
+        let id = wrapper.card_set_json.card_set.set_info.set_id;
+        let f = format!("card_set_{}.json", id);
+        let path = cache_dir.join(f);
+        let file = File::create(path).unwrap();
+        let _ = serde_json::to_writer(file, &wrapper);
+        card_sets.push(wrapper.card_set_json.card_set);
     }
 
     Ok(card_sets)
 }
 
-/// Takes in a vector of JSON formatted &str and attempts to coerce them into CardSetJson,
-/// if successful, maps card_ids to Cards.\
-/// The JSON should take the form mentioned
-/// [here](https://github.com/ValveSoftware/ArtifactDeckCode)
-/// ```ignore
-///{
-///  "card_set": {
-///    "version": 1,
-///  "set_info": {
-///   "set_id": 0,
-///    "pack_item_def": 0,
-///     "name": {
-///        "english": "Base Set"
-///      }
-///    },
-///   "card_list": [{
-///
-///   "card_id": 4000,
-///   "base_card_id": 4000,
-///    "card_type": "Hero",
-///   "card_name": {
-///     "english": "Farvhan the Dreamer"
-///  },
-///   "card_text": {
-///      "english": "Pack Leadership<BR>\nFarvhan the Dreamer's allied neighbors have +1 Armor."
-///    },
-///     "mini_image": {
-///       "default": "<url to png>"
-///     },
-///    "large_image": {
-///       "default": "<url to png>"
-///      },
-///     "ingame_image": {
-///       "default": "<url to png>"
-///    },
-///    "is_green": true,
-///    "attack": 4,
-///    "hit_points": 10,
-///      "references": [{
-///      "card_id": 4002,
-///        "ref_type": "includes",
-///          "count": 3
-///  },
-///        {
-///        "card_id": 4001,
-///      "ref_type": "passive_ability"
-///        }
-///    ]
-///
-///
-///    },
-///    ..... more cards ....
-///
-///    ]
-///  }
-///}
-///```
-///
-pub fn map_card_ids_to_cards_from_str(
-    sets: Vec<&str>,
-) -> Result<HashMap<u32, crate::Card>, String> {
-    let mut d_sets = Vec::new();
-    for set in sets {
-        let s: crate::CardSetJson = match serde_json::from_str(set) {
-            Ok(s) => s,
-            Err(e) => {
-                let error_string = format!("Invalid JSON input: {}", e);
-                return Err(error_string);
-            }
-        };
+fn fetch_card_set(set: u8) -> Result<ExpirationWrapper, String> {
+    let valve_api_path = format!("https://playartifact.com/cardset/{}", set);
 
-        let d = s.card_set;
-        d_sets.push(d);
-    }
+    let redir: JsonRef = match reqwest::get(valve_api_path.as_str()) {
+        Ok(mut r) => match r.json() {
+            Ok(j) => j,
+            Err(e) => return Err(format!("Error coercing response to JsonRef: {}", e)),
+        },
+        Err(e) => return Err(format!("Error reaching Valve redirect endpoint: {}", e)),
+    };
 
-    Ok(set_up_deck_map(d_sets))
+    let card_set_url = format!("{}{}", redir.cdn_root, redir.url);
+
+    let card_set_json: CardSetJson = match reqwest::get(card_set_url.as_str()) {
+        Ok(mut r) => match r.json() {
+            Ok(j) => j,
+            Err(e) => return Err(format!("Error coercing response to CardSetJson: {}", e)),
+        },
+        Err(e) => return Err(format!("Error reaching Valve card set endpoint: {}", e)),
+    };
+
+    Ok(ExpirationWrapper {
+        card_set_json,
+        expire_time: redir.expire_time,
+    })
 }
 
-pub fn set_up_deck_map(sets: Vec<crate::CardSet>) -> HashMap<u32, crate::Card> {
-    let mut map = HashMap::<u32, crate::Card>::new();
+pub fn map_ids_to_cards(sets: Vec<crate::CardSet>) -> HashMap<u32, crate::Card> {
+    let mut map = HashMap::new();
     for set in sets {
         for card in set.card_list {
             map.insert(card.card_id, card);
+        }
+    }
+    map
+}
+
+pub fn map_names_to_cards(sets: Vec<crate::CardSet>) -> HashMap<String, crate::Card> {
+    let mut map = HashMap::new();
+    for set in sets {
+        for card in set.card_list {
+            map.insert(card.card_name.english.clone(), card);
         }
     }
     map
@@ -353,7 +385,14 @@ mod tests {
     }
 
     #[test]
-    fn fetch_cards() {
-        let _sets = crate::get_all_card_sets();
+    fn test_artifact() {
+        let my_artifact: super::Artifact = super::Artifact::new();
+        let named_card = my_artifact.card_from_name("Storm Spirit").unwrap();
+        let id_card = my_artifact.card_from_id(named_card.card_id).unwrap();
+        assert_eq!(named_card, id_card);
+
+        let my_adc = "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__";
+        let my_deck = my_artifact.get_deck(my_adc);
+        println!("{:?}", my_deck);
     }
 }
