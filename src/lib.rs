@@ -184,10 +184,12 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
         Ok(d) => d,
         Err(_) => match create_dir(cache_dir) {
             Ok(_) => read_dir(cache_dir).unwrap(),
-            Err(e) => panic!(
-                "Error reading or creating directory: {:?}, {}",
-                cache_dir, e
-            ),
+            Err(e) => {
+                return Err(format!(
+                    "Error reading or creating directory: {:?}, {}",
+                    cache_dir, e
+                ))
+            }
         },
     };
 
@@ -199,16 +201,26 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
     println!("Attempting to fetch card sets from cache");
     let mut card_sets: Vec<CardSet> = Vec::new();
     for path in dir {
-        let file: ExpirationWrapper = serde_json::from_reader(
+        let file: ExpirationWrapper = match serde_json::from_reader(
             File::open(path.unwrap().path()).expect("something broke reading cache file"),
-        )
-        .unwrap();
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                return Err(format!(
+                    "failed to coerce cache file to ExpirationWrapper: {}",
+                    e
+                ))
+            }
+        };
+
         let id = file.card_set_json.card_set.set_info.set_id;
         if std::time::Duration::new(file.expire_time, 0) > time {
             println!("card set {} is up to date", id);
             let rem = fetch_sets.iter().position(|x| *x == id as u8).unwrap();
             fetch_sets.remove(rem);
             card_sets.push(file.card_set_json.card_set);
+        } else {
+            println!("card set {} is expired", id);
         }
     }
 
@@ -289,6 +301,9 @@ mod tests {
 
     #[test]
     fn fetch_cards() {
-        let _sets = crate::get_all_card_sets();
+        let sets = crate::get_all_card_sets().unwrap();
+        for set in sets {
+            println!("{:?}", set.set_info.name.english);
+        }
     }
 }
