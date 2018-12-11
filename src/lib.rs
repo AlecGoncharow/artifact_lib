@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate serde_derive;
+extern crate artifact_serde;
 extern crate directories;
 extern crate regex;
 extern crate reqwest;
@@ -20,13 +21,13 @@ struct ExpirationWrapper {
 pub struct CardSetJson {
     pub card_set: CardSet,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CardSet {
     pub version: u32,
     pub set_info: SetInfo,
     pub card_list: Vec<Card>,
 }
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SetInfo {
     pub set_id: u32,
     pub pack_item_def: u32,
@@ -123,6 +124,13 @@ pub struct Card {
     pub hit_points: u32,
     pub references: Vec<Reference>,
 }
+
+impl std::cmp::PartialEq for Card {
+    fn eq(&self, other: &Card) -> bool {
+        self.card_id == other.card_id
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HeroCard {
     pub card: Card,
@@ -163,6 +171,83 @@ pub struct Reference {
     pub ref_type: String,
     #[serde(default)]
     pub count: u32,
+}
+
+pub struct Artifact {
+    pub card_sets: Vec<CardSet>,
+    id_map: HashMap<u32, Card>,
+    name_map: HashMap<String, Card>,
+}
+
+impl Artifact {
+    pub fn new() -> Self {
+        let card_sets = get_all_card_sets().unwrap();
+        let id_map = map_ids_to_cards(card_sets.clone());
+        let name_map = map_names_to_cards(card_sets.clone());
+        Self {
+            card_sets,
+            id_map,
+            name_map,
+        }
+    }
+
+    pub fn card_from_name(&self, name: &str) -> Option<&Card> {
+        self.card_from_name_string(&String::from(name))
+    }
+
+    pub fn card_from_name_string(&self, name: &String) -> Option<&Card> {
+        self.name_map.get(name)
+    }
+
+    pub fn card_from_id(&self, id: u32) -> Option<&Card> {
+        self.id_map.get(&id)
+    }
+
+    pub fn get_deck(&self, adc: &str) -> Result<Deck, String> {
+        let mut decoded_deck = artifact_serde::de::decode(adc).unwrap();
+        let mut heroes = Vec::new();
+        for hero in decoded_deck.heroes {
+            let card = match self.id_map.get(&hero.id) {
+                Some(c) => c.clone(),
+                None => continue,
+            };
+            let refer = card.references.clone();
+            for r in refer {
+                if r.ref_type == "includes" {
+                    decoded_deck
+                        .cards
+                        .push(artifact_serde::de::DeserializedCard {
+                            id: r.card_id,
+                            count: r.count,
+                        });
+                }
+            }
+
+            heroes.push(HeroCard {
+                card,
+                turn: hero.turn,
+            });
+        }
+
+        let mut cards = Vec::new();
+        for ref_card in decoded_deck.cards {
+            let card = match self.id_map.get(&ref_card.id) {
+                Some(c) => c.clone(),
+                None => continue,
+            };
+
+            cards.push(CardCard {
+                card,
+                count: ref_card.count,
+            });
+        }
+
+        Ok(Deck {
+            heroes,
+            cards,
+            name: decoded_deck.name,
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -300,10 +385,14 @@ mod tests {
     }
 
     #[test]
-    fn fetch_cards() {
-        let sets = crate::get_all_card_sets().unwrap();
-        for set in sets {
-            println!("{:?}", set.set_info.name.english);
-        }
+    fn test_artifact() {
+        let my_artifact: super::Artifact = super::Artifact::new();
+        let named_card = my_artifact.card_from_name("Storm Spirit").unwrap();
+        let id_card = my_artifact.card_from_id(named_card.card_id).unwrap();
+        assert_eq!(named_card, id_card);
+
+        let my_adc = "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__";
+        let my_deck = my_artifact.get_deck(my_adc);
+        println!("{:?}", my_deck);
     }
 }
