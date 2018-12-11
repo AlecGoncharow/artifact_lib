@@ -12,11 +12,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const CURRENT_SET: u8 = 2;
 
+/// Wraps the [CardSetJson](struct.CardSetJson.html) with the expiration time.
 #[derive(Serialize, Deserialize, Debug)]
 struct ExpirationWrapper {
     expire_time: u64,
     card_set_json: CardSetJson,
 }
+/// This is the top level of the response JSON provided by the Valve [API](https://github.com/ValveSoftware/ArtifactDeckCode#card-set-api)
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CardSetJson {
     pub card_set: CardSet,
@@ -141,6 +143,7 @@ pub struct CardCard {
     pub card: Card,
     pub count: u32,
 }
+/// Artifact deck representation, typically derived from Artifact Deck Codes.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Deck {
     pub name: String,
@@ -173,13 +176,27 @@ pub struct Reference {
     pub count: u32,
 }
 
+/// Helper struct that will store the [CardSets](struct.CardSet.html) and a couple
+/// HashMaps for fast indexing
+/// # Example Usage
+/// ```
+/// let my_artifact = artifact_lib::Artifact::new();
+/// let named_card = my_artifact.card_from_name("Storm Spirit").unwrap();
+/// let id_card = my_artifact.card_from_id(named_card.card_id).unwrap();
+///
+/// let my_adc = "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__";
+/// let my_deck = my_artifact.get_deck(my_adc);
+/// ```
 pub struct Artifact {
     pub card_sets: Vec<CardSet>,
-    id_map: HashMap<u32, Card>,
-    name_map: HashMap<String, Card>,
+    pub id_map: HashMap<u32, Card>,
+    pub name_map: HashMap<String, Card>,
 }
 
 impl Artifact {
+    /// Creates a new Artifact object, prepopulated with all the
+    /// card sets and a couple HashMaps that help with indexing
+    /// into the card sets
     pub fn new() -> Self {
         let card_sets = get_all_card_sets().unwrap();
         let id_map = map_ids_to_cards(card_sets.clone());
@@ -203,6 +220,8 @@ impl Artifact {
         self.id_map.get(&id)
     }
 
+    /// Takes in an ADC and returns the corresponding Deck, including
+    /// Hero reference cards.
     pub fn get_deck(&self, adc: &str) -> Result<Deck, String> {
         let mut decoded_deck = artifact_serde::de::decode(adc).unwrap();
         let mut heroes = Vec::new();
@@ -259,7 +278,7 @@ struct JsonRef {
 
 /// This function will search the user's local cache for
 /// the card set data, if not found or out of date, will
-/// fetch updates from Valve's API and update the cached files.
+/// fetch updates from Valve's API and create and update the cached files.
 /// Once that process is complete, it will return a Vec of [CardSets](struct.CardSet.html).
 pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -358,6 +377,7 @@ fn fetch_card_set(set: u8) -> Result<ExpirationWrapper, String> {
     })
 }
 
+/// Returns a HashMap mapping cards' card_ids  to the respective card
 pub fn map_ids_to_cards(sets: Vec<crate::CardSet>) -> HashMap<u32, crate::Card> {
     let mut map = HashMap::new();
     for set in sets {
@@ -368,6 +388,7 @@ pub fn map_ids_to_cards(sets: Vec<crate::CardSet>) -> HashMap<u32, crate::Card> 
     map
 }
 
+/// Returns a HashMap mapping cards' English names to the respective card
 pub fn map_names_to_cards(sets: Vec<crate::CardSet>) -> HashMap<String, crate::Card> {
     let mut map = HashMap::new();
     for set in sets {
