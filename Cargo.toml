@@ -6,7 +6,7 @@ description = "Library for handling various aspects of interacting with Valve's 
 repository = "https://github.com/AlecGoncharow/artifact_lib"
 edition = "2018"
 license="MIT"
-categories = ["API bindings"]
+categories = ["api-bindings"]
 
 [badges]
 maintenance = {status = "experimental"}
