@@ -306,7 +306,7 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
     let mut card_sets: Vec<CardSet> = Vec::new();
     for path in dir {
         let file: ExpirationWrapper = match serde_json::from_reader(
-            File::open(path.unwrap().path()).expect("something broke reading cache file"),
+            File::open(path.unwrap().path()).expect("failed to read cache file"),
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -342,7 +342,7 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
         let id = wrapper.card_set_json.card_set.set_info.set_id;
         let f = format!("card_set_{}.json", id);
         let path = cache_dir.join(f);
-        let file = File::create(path).unwrap();
+        let file = File::create(path).expect("failed to create file in cache");
         let _ = serde_json::to_writer(file, &wrapper);
         card_sets.push(wrapper.card_set_json.card_set);
     }
@@ -408,8 +408,12 @@ mod tests {
     #[test]
     fn test_artifact() {
         let my_artifact: super::Artifact = super::Artifact::new();
-        let named_card = my_artifact.card_from_name("Storm Spirit").unwrap();
-        let id_card = my_artifact.card_from_id(named_card.card_id).unwrap();
+        let named_card = my_artifact
+            .card_from_name("Storm Spirit")
+            .expect("could not get card from name");
+        let id_card = my_artifact
+            .card_from_id(named_card.card_id)
+            .expect("could not get card from id");
         assert_eq!(named_card, id_card);
 
         let my_adc = "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__";
