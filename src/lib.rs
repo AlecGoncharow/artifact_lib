@@ -281,13 +281,16 @@ struct JsonRef {
 /// fetch updates from Valve's API and create and update the cached files.
 /// Once that process is complete, it will return a Vec of [CardSets](struct.CardSet.html).
 pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
-    let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    let proj_dir = directories::ProjectDirs::from("", "", "artifact_lib").unwrap();
+    let time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("failed to get unix timestamp");
+    let proj_dir = directories::ProjectDirs::from("", "", "artifact_lib")
+        .expect("failed to build ProjectDirs");
     let cache_dir = proj_dir.cache_dir();
     let dir = match read_dir(cache_dir) {
         Ok(d) => d,
         Err(_) => match create_dir(cache_dir) {
-            Ok(_) => read_dir(cache_dir).unwrap(),
+            Ok(_) => read_dir(cache_dir).expect("failed to read cache directory"),
             Err(e) => {
                 return Err(format!(
                     "Error reading or creating directory: {:?}, {}",
@@ -306,7 +309,8 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
     let mut card_sets: Vec<CardSet> = Vec::new();
     for path in dir {
         let file: ExpirationWrapper = match serde_json::from_reader(
-            File::open(path.unwrap().path()).expect("failed to read cache file"),
+            File::open(path.expect("failed to open card set json in cache").path())
+                .expect("failed to read cache file"),
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -320,7 +324,10 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
         let id = file.card_set_json.card_set.set_info.set_id;
         if std::time::Duration::new(file.expire_time, 0) > time {
             println!("card set {} is up to date", id);
-            let rem = fetch_sets.iter().position(|x| *x == id as u8).unwrap();
+            let rem = fetch_sets
+                .iter()
+                .position(|x| *x == id as u8)
+                .expect("something terrible has happened, this is a bug");
             fetch_sets.remove(rem);
             card_sets.push(file.card_set_json.card_set);
         } else {
