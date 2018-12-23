@@ -2,7 +2,6 @@
 extern crate serde_derive;
 extern crate artifact_serde;
 extern crate directories;
-extern crate regex;
 extern crate reqwest;
 extern crate serde_json;
 
@@ -223,7 +222,7 @@ impl Artifact {
     /// Takes in an ADC and returns the corresponding Deck, including
     /// Hero reference cards.
     pub fn get_deck(&self, adc: &str) -> Result<Deck, String> {
-        let mut decoded_deck = artifact_serde::de::decode(adc).unwrap();
+        let mut decoded_deck = artifact_serde::de::decode(adc).expect("failed to decode adc");
         let mut heroes = Vec::new();
         for hero in decoded_deck.heroes {
             let card = match self.id_map.get(&hero.id) {
@@ -425,6 +424,6 @@ mod tests {
 
         let my_adc = "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__";
         let my_deck = my_artifact.get_deck(my_adc);
-        println!("{:?}", my_deck);
+        //println!("{:?}", my_deck);
     }
 }

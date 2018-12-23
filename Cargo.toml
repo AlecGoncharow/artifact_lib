@@ -5,7 +5,7 @@ authors = ["Alec Goncharow <Alec.Goncharow@gmail.com>"]
 description = "Library for handling various aspects of interacting with Valve's Artifact API and Cards"
 repository = "https://github.com/AlecGoncharow/artifact_lib"
 edition = "2018"
-license="MIT"
+license = "MIT"
 categories = ["api-bindings"]
 
 [badges]
@@ -15,7 +15,6 @@ maintenance = {status = "experimental"}
 artifact_serde = "0.2.1"
 directories = "1.0.2"
 reqwest = "0.9.5"
-regex = "1.1.0"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
