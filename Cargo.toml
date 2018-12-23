@@ -1,6 +1,6 @@
 [package]
 name = "artifact_lib"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Alec Goncharow <Alec.Goncharow@gmail.com>"]
 description = "Library for handling various aspects of interacting with Valve's Artifact API and Cards"
 repository = "https://github.com/AlecGoncharow/artifact_lib"
