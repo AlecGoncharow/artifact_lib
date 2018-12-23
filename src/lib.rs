@@ -212,7 +212,7 @@ impl Artifact {
     }
 
     pub fn card_from_name_string(&self, name: &String) -> Option<&Card> {
-        self.name_map.get(name)
+        self.name_map.get(&name.to_lowercase())
     }
 
     pub fn card_from_id(&self, id: u32) -> Option<&Card> {
@@ -399,7 +399,7 @@ pub fn map_names_to_cards(sets: Vec<crate::CardSet>) -> HashMap<String, crate::C
     let mut map = HashMap::new();
     for set in sets {
         for card in set.card_list {
-            map.insert(card.card_name.english.clone(), card);
+            map.insert(card.card_name.english.to_lowercase(), card);
         }
     }
     map
