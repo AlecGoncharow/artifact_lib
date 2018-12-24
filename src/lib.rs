@@ -181,6 +181,21 @@ pub enum NamedCard {
     Multiple(Vec<Card>),
 }
 
+impl NamedCard {
+    pub fn is_single(&self) -> bool {
+        match self {
+            NamedCard::Single(_) => true,
+            NamedCard::Multiple(_) => false,
+        }
+    }
+
+    pub fn into_vec(&self) -> Vec<Card> {
+        match self {
+            NamedCard::Single(s) => vec![s.clone()],
+            NamedCard::Multiple(m) => m.clone(),
+        }
+    }
+}
 /// Helper struct that will store the [CardSets](struct.CardSet.html) and a couple
 /// HashMaps for fast indexing
 /// # Example Usage
