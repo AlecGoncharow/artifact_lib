@@ -175,12 +175,24 @@ pub struct Reference {
     pub count: u32,
 }
 
+#[derive(Debug, Clone)]
+pub enum NamedCard {
+    Single(Card),
+    Multiple(Vec<Card>),
+}
+
 /// Helper struct that will store the [CardSets](struct.CardSet.html) and a couple
 /// HashMaps for fast indexing
 /// # Example Usage
 /// ```
 /// let my_artifact = artifact_lib::Artifact::new();
-/// let named_card = my_artifact.card_from_name("Storm Spirit").unwrap();
+/// let named_card = match my_artifact.card_from_name("Storm Spirit") {
+///     Some(c) => match c {
+///         artifact_lib::NamedCard::Single(s) => s,
+///         artifact_lib::NamedCard::Multiple(m) => m.first().unwrap(),
+///     }
+///     _ => panic!("this should not happen"),
+/// };
 /// let id_card = my_artifact.card_from_id(named_card.card_id).unwrap();
 ///
 /// let my_adc = "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__";
@@ -189,7 +201,7 @@ pub struct Reference {
 pub struct Artifact {
     pub card_sets: Vec<CardSet>,
     pub id_map: HashMap<u32, Card>,
-    pub name_map: HashMap<String, Card>,
+    pub name_map: HashMap<String, NamedCard>,
 }
 
 impl Artifact {
@@ -207,11 +219,11 @@ impl Artifact {
         }
     }
 
-    pub fn card_from_name(&self, name: &str) -> Option<&Card> {
+    pub fn card_from_name(&self, name: &str) -> Option<&NamedCard> {
         self.card_from_name_string(&String::from(name))
     }
 
-    pub fn card_from_name_string(&self, name: &String) -> Option<&Card> {
+    pub fn card_from_name_string(&self, name: &String) -> Option<&NamedCard> {
         self.name_map.get(&name.to_lowercase())
     }
 
@@ -395,11 +407,38 @@ pub fn map_ids_to_cards(sets: Vec<crate::CardSet>) -> HashMap<u32, crate::Card> 
 }
 
 /// Returns a HashMap mapping cards' English names to the respective card
-pub fn map_names_to_cards(sets: Vec<crate::CardSet>) -> HashMap<String, crate::Card> {
+pub fn map_names_to_cards(sets: Vec<crate::CardSet>) -> HashMap<String, crate::NamedCard> {
     let mut map = HashMap::new();
     for set in sets {
         for card in set.card_list {
-            map.insert(card.card_name.english.to_lowercase(), card);
+            let value = map.get(&card.card_name.english.to_lowercase());
+            match value {
+                Some(c) => match c {
+                    NamedCard::Multiple(m) => {
+                        let mut vec = m.clone();
+                        vec.push(card.clone());
+                        map.insert(
+                            card.card_name.english.to_lowercase(),
+                            NamedCard::Multiple(vec),
+                        );
+                    }
+                    NamedCard::Single(s) => {
+                        let mut vec: Vec<Card> = Vec::new();
+                        vec.push(s.clone());
+                        vec.push(card.clone());
+                        map.insert(
+                            card.card_name.english.to_lowercase(),
+                            NamedCard::Multiple(vec),
+                        );
+                    }
+                },
+                None => {
+                    map.insert(
+                        card.card_name.english.to_lowercase(),
+                        NamedCard::Single(card),
+                    );
+                }
+            }
         }
     }
     map
@@ -414,9 +453,13 @@ mod tests {
     #[test]
     fn test_artifact() {
         let my_artifact: super::Artifact = super::Artifact::new();
-        let named_card = my_artifact
-            .card_from_name("Storm Spirit")
-            .expect("could not get card from name");
+        let named_card: &crate::Card = match my_artifact.card_from_name("Storm Spirit") {
+            Some(c) => match c {
+                crate::NamedCard::Single(s) => s,
+                crate::NamedCard::Multiple(m) => m.first().unwrap(),
+            },
+            None => panic!("could not get Storm Spirit"),
+        };
         let id_card = my_artifact
             .card_from_id(named_card.card_id)
             .expect("could not get card from id");
