@@ -122,6 +122,8 @@ pub struct Card {
     #[serde(default)]
     pub attack: u32,
     #[serde(default)]
+    pub armor: u32,
+    #[serde(default)]
     pub hit_points: u32,
     pub references: Vec<Reference>,
 }
