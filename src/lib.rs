@@ -5,6 +5,7 @@ extern crate directories;
 extern crate reqwest;
 extern crate serde_json;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::{create_dir, read_dir, File};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -34,7 +35,7 @@ pub struct SetInfo {
     pub pack_item_def: u32,
     pub name: TranslatedText,
 }
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq)]
 pub struct TranslatedText {
     #[serde(default)]
     pub english: String,
@@ -93,7 +94,14 @@ pub struct TranslatedText {
     #[serde(default)]
     pub vietnamese: String,
 }
-#[derive(Serialize, Deserialize, Debug, Clone)]
+
+impl PartialEq for TranslatedText {
+    fn eq(&self, other: &TranslatedText) -> bool {
+        self.english == other.english
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq)]
 pub struct Card {
     pub card_id: u32,
     pub base_card_id: u32,
@@ -133,17 +141,86 @@ impl std::cmp::PartialEq for Card {
         self.card_id == other.card_id
     }
 }
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+pub enum CardColor {
+    Red,
+    Blue,
+    Black,
+    Green,
+    Item,
+}
+impl Card {
+    pub fn get_color(&self) -> CardColor {
+        if self.is_red {
+            CardColor::Red
+        } else if self.is_blue {
+            CardColor::Blue
+        } else if self.is_black {
+            CardColor::Black
+        } else if self.is_blue {
+            CardColor::Blue
+        } else {
+            CardColor::Item
+        }
+    }
+}
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Eq)]
 pub struct HeroCard {
     pub card: Card,
     pub turn: u32,
+    pub color: CardColor,
 }
-#[derive(Serialize, Deserialize, Debug)]
+impl PartialEq for HeroCard {
+    fn eq(&self, other: &HeroCard) -> bool {
+        self.turn == other.turn
+    }
+}
+impl Ord for HeroCard {
+    fn cmp(&self, other: &HeroCard) -> Ordering {
+        self.turn.cmp(&other.turn)
+    }
+}
+
+impl PartialOrd for HeroCard {
+    fn partial_cmp(&self, other: &HeroCard) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+// Red < Blue < Black < Green | mana < gold
+#[derive(Serialize, Deserialize, Debug, Eq)]
 pub struct CardCard {
     pub card: Card,
     pub count: u32,
+    pub color: CardColor,
 }
+impl PartialEq for CardCard {
+    fn eq(&self, other: &CardCard) -> bool {
+        self.card.card_id == other.card.card_id
+    }
+}
+
+impl Ord for CardCard {
+    fn cmp(&self, other: &CardCard) -> Ordering {
+        match self.color {
+            CardColor::Item => match other.color {
+                CardColor::Item => self.card.gold_cost.cmp(&other.card.gold_cost),
+                _ => Ordering::Greater,
+            },
+            _ => match other.color {
+                CardColor::Item => Ordering::Less,
+                _ => self.card.mana_cost.cmp(&other.card.mana_cost),
+            },
+        }
+    }
+}
+
+impl PartialOrd for CardCard {
+    fn partial_cmp(&self, other: &CardCard) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// Artifact deck representation, typically derived from Artifact Deck Codes.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Deck {
@@ -162,12 +239,18 @@ impl Deck {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq)]
 pub struct Image {
     #[serde(default)]
     pub default: String,
 }
-#[derive(Serialize, Deserialize, Debug, Clone)]
+impl PartialEq for Image {
+    fn eq(&self, other: &Image) -> bool {
+        self.default == other.default
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Eq)]
 pub struct Reference {
     #[serde(default)]
     pub card_id: u32,
@@ -176,7 +259,11 @@ pub struct Reference {
     #[serde(default)]
     pub count: u32,
 }
-
+impl PartialEq for Reference {
+    fn eq(&self, other: &Reference) -> bool {
+        self.card_id == other.card_id
+    }
+}
 #[derive(Debug, Clone)]
 pub enum NamedCard {
     Single(Card),
@@ -258,6 +345,7 @@ impl Artifact {
                 Some(c) => c.clone(),
                 None => continue,
             };
+            let color = card.get_color();
             let refer = card.references.clone();
             for r in refer {
                 if r.ref_type == "includes" {
@@ -273,6 +361,7 @@ impl Artifact {
             heroes.push(HeroCard {
                 card,
                 turn: hero.turn,
+                color: color,
             });
         }
 
@@ -282,10 +371,12 @@ impl Artifact {
                 Some(c) => c.clone(),
                 None => continue,
             };
+            let color = card.get_color();
 
             cards.push(CardCard {
                 card,
                 count: ref_card.count,
+                color,
             });
         }
 
