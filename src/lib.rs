@@ -170,6 +170,8 @@ impl Card {
             CardColor::Black
         } else if self.is_blue {
             CardColor::Blue
+        } else if self.is_red {
+            CardColor::Green
         } else {
             CardColor::Item
         }
