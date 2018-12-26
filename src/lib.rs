@@ -149,6 +149,17 @@ pub enum CardColor {
     Green,
     Item,
 }
+impl std::fmt::Display for CardColor {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match *self {
+            CardColor::Red => write!(f, "Red"),
+            CardColor::Blue => write!(f, "Blue"),
+            CardColor::Black => write!(f, "Black"),
+            CardColor::Green => write!(f, "Green"),
+            CardColor::Item => write!(f, "Item"),
+        }
+    }
+}
 impl Card {
     pub fn get_color(&self) -> CardColor {
         if self.is_red {
