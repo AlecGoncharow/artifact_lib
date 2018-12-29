@@ -9,6 +9,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::{create_dir, read_dir, File};
 use std::time::{SystemTime, UNIX_EPOCH};
+use artifact_serde::de::decode;
+use directories::ProjectDirs;
 
 const CURRENT_SET: u8 = 2;
 
@@ -291,10 +293,30 @@ impl NamedCard {
         }
     }
 
-    pub fn into_vec(&self) -> Vec<Card> {
+    pub fn into_vec(self) -> Vec<Card> {
         match self {
             NamedCard::Single(s) => vec![s.clone()],
             NamedCard::Multiple(m) => m.clone(),
+        }
+    }
+
+    /// Due to the nature of the data provided by Valve, the active component
+    /// of cards are sometimes called the same way as the card itself.
+    /// This function takes this into account and unwraps then NamedCard into a card, where
+    /// Multiple types are unwrapped into the card which contains the actual card and not the
+    /// active component, assuming it can find the card matching this case.
+    pub fn into_card(self) -> Option<Card> {
+        match self {
+            NamedCard::Single(s) => Some(s.clone()),
+            NamedCard::Multiple(m) => {
+                let mut ret: Option<Card> = None;
+                for card in m {
+                    if card.large_image.default != "" {
+                        ret = Some(card.clone());
+                    }
+                }
+                ret
+            }
         }
     }
 }
@@ -351,7 +373,7 @@ impl Artifact {
     /// Takes in an ADC and returns the corresponding Deck, including
     /// Hero reference cards.
     pub fn get_deck(&self, adc: &str) -> Result<Deck, String> {
-        let mut decoded_deck = artifact_serde::de::decode(adc).expect("failed to decode adc");
+        let mut decoded_deck = decode(adc).expect("failed to decode adc");
         let mut heroes = Vec::new();
         for hero in decoded_deck.heroes {
             let card = match self.id_map.get(&hero.id) {
@@ -416,7 +438,7 @@ pub fn get_all_card_sets() -> Result<Vec<CardSet>, String> {
     let time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("failed to get unix timestamp");
-    let proj_dir = directories::ProjectDirs::from("", "", "artifact_lib")
+    let proj_dir = ProjectDirs::from("", "", "artifact_lib")
         .expect("failed to build ProjectDirs");
     let cache_dir = proj_dir.cache_dir();
     let dir = match read_dir(cache_dir) {
@@ -587,7 +609,7 @@ mod tests {
         assert_eq!(named_card, id_card);
 
         let my_adc = "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__";
-        let my_deck = my_artifact.get_deck(my_adc);
+        let _my_deck = my_artifact.get_deck(my_adc);
         //println!("{:?}", my_deck);
     }
 }
